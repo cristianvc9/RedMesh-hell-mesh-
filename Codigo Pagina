@@ -1,1 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
 
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Medidores de Temperatura y Humedad</title>
+    <script src="justgage.js"></script>
+    <script src="raphael-2.1.4.min.js"></script>
+
+    <style>
+        body {
+            background-color: #18152f;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        h1 {
+            margin-top: 0;
+            font-family: Georgia, 'Times New Roman', Times, serif;
+            font-size: 35px;
+        }
+
+        h2 {
+            margin-top: 0;
+            font-family: Georgia, 'Times New Roman', Times, serif;
+            font-size: 25px;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: center;
+            width: calc(100% - 40%);
+            margin: 0 auto;
+
+        }
+
+        .gauge-container {
+            background-color: #2b2845;
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        .gauge {
+            margin-top: 15px;
+            max-width: 100%;
+            width: 300px;
+            height: 250px;
+        }
+
+        @media only screen and (max-width: 768px) {
+            .container {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            h1 {
+                margin-top: 0;
+                font-family: Georgia, 'Times New Roman', Times, serif;
+                font-size: 25px;
+            }
+
+            h2 {
+                margin-top: 0;
+                font-family: Georgia, 'Times New Roman', Times, serif;
+                font-size: 15px;
+            }
+
+            .gauge {
+                width: 100%;
+                height: auto;
+            }
+
+            .gauge-container {
+                margin-top: 10px;
+            }
+
+
+        }
+    </style>
+
+</head>
+
+<body>
+    <h1>HELL-MESH</h1>
+    <h2>Medidores de Temperatura y Humedad</h2>
+
+    <div class="container">
+        <div class="gauge-container">
+            <div id="temperatureGauge" class="gauge"></div>
+        </div>
+        <div class="gauge-container">
+            <div id="humidityGauge" class="gauge"></div>
+        </div>
+    </div>
+
+
+    <script>
+        var temperatureGauge = new JustGage({
+            id: "temperatureGauge",
+            value: 0,
+            min: 0,
+            max: 100,
+            title: "Temperatura",
+            label: "°C",
+            gaugeColor: "#717171",
+            levelColors: ["#58FF02", "#EEFF02", "#FF3302"],
+            levelColorsGradient: true,
+            shadowOpacity: 0,
+            valueFontColor: "#ffffff",
+            titleFontColor: "#FFFFFF",
+            titleFontFamily: "Arial, sans-serif"
+        });
+        var humidityGauge = new JustGage({
+            id: "humidityGauge",
+            value: 0,
+            min: 0,
+            max: 100,
+            title: "Humedad",
+            label: "%",
+            gaugeColor: "#C1C1C1",
+            levelColors: ["#04F2C2", "#8F25FB", "#D50070"],
+            levelColorsGradient: true,
+            shadowOpacity: 0,
+            valueFontColor: "#ffffff",
+            titleFontColor: "#FFFFFF",
+            titleFontFamily: "Arial, sans-serif"
+        });
+
+
+        var webSocket = new WebSocket('ws://' + window.location.hostname + ':81/');
+        webSocket.onmessage = function (event) {
+            var data = JSON.parse(event.data);
+            temperatureGauge.refresh(data.temperature);
+            humidityGauge.refresh(data.humidity);
+
+        };
+
+
+    </script>
+</body>
+
+</html>
