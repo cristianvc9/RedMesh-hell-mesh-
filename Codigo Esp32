@@ -1,1 +1,195 @@
+#include <WiFi.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <ESPmDNS.h>
+#include <DHT.h>
+#include <WebSocketsServer.h>
+#include <painlessMesh.h>
+#include <SPIFFS.h>
 
+// WiFi credentials
+const char* ssid = "PC";
+const char* password = "123456789";
+
+// Mesh network configuration
+#define MESH_PREFIX "HELL-MESH"
+#define MESH_PASSWORD "123456789"
+#define MESH_PORT 5555
+
+// DHT sensor configuration
+#define DHTPIN 2
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+// Web server and WebSocket setup
+AsyncWebServer server(80);
+WebSocketsServer webSocket = WebSocketsServer(81);
+
+// Mesh and task scheduler setup
+Scheduler userScheduler;
+painlessMesh mesh;
+
+// Function prototypes
+void sendMessage();
+void sendData(float temperature, float humidity);
+void receivedCallback(uint32_t from, String& msg);
+void newConnectionCallback(uint32_t nodeId);
+void changedConnectionCallback();
+void nodeTimeAdjustedCallback(int32_t offset);
+void notFound(AsyncWebServerRequest* request);
+void setupMDNS(); 
+
+// Task object declaration
+Task taskSendMessage(TASK_SECOND * 1, TASK_FOREVER, &sendMessage);
+const unsigned long sendInterval = 2000;
+
+void setup() {
+  Serial.begin(115200);
+  connectToWiFi();
+  setupDHT();
+  setupSPIFFS();
+  setupWebServer();
+  setupWebSocket();
+  setupMDNS(); // Call to setup mDNS
+  setupMesh();
+}
+
+void loop() {
+  webSocket.loop();
+  mesh.update();
+  sendDataIfNeeded();
+}
+
+void connectToWiFi() {
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.println("Conectando a WiFi...");
+  }
+  Serial.println("Conectado a la red WiFi");
+  Serial.println("Direccion IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+void setupDHT() {
+  dht.begin();
+}
+
+void setupSPIFFS() {
+  if (SPIFFS.begin(true)) {
+    Serial.println("SPIFFS montado correctamente");
+  } else {
+    Serial.println("Error al montar SPIFFS");
+  }
+}
+
+void setupWebServer() {
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
+    request->send(SPIFFS, "/index.html", "text/html");
+  });
+  server.onNotFound(notFound);
+  server.begin();
+}
+
+void setupWebSocket() {
+  webSocket.begin();
+  webSocket.onEvent(handleWebSocketMessage);
+}
+
+void setupMesh() {
+  mesh.setDebugMsgTypes(ERROR | STARTUP);
+  mesh.init(MESH_PREFIX, MESH_PASSWORD, &userScheduler, MESH_PORT);
+  mesh.onReceive(&receivedCallback);
+  mesh.onNewConnection(&newConnectionCallback);
+  mesh.onChangedConnections(&changedConnectionCallback);
+  mesh.onNodeTimeAdjusted(&nodeTimeAdjustedCallback);
+  userScheduler.addTask(taskSendMessage);
+  taskSendMessage.enable();
+}
+
+void sendDataIfNeeded() {
+  static unsigned long prevMillis = 0;
+  if (millis() - prevMillis >= sendInterval) {
+    prevMillis = millis();
+    float temperature = dht.readTemperature();
+    float humidity = dht.readHumidity();
+    if (!isnan(temperature) && !isnan(humidity)) {
+      sendData(temperature, humidity);
+    } else {
+    }
+  }
+}
+
+void sendData(float temperature, float humidity) {
+  String data = "{\"temperature\":" + String(temperature) + ", \"humidity\":" + String(humidity) + "}";
+  webSocket.broadcastTXT(data);
+
+  String msgTemp = "Temperature: " + String(temperature);
+  mesh.sendBroadcast(msgTemp);
+
+  String msgHum = "Humidity: " + String(humidity);
+  mesh.sendBroadcast(msgHum);
+}
+
+void handleWebSocketMessage(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
+  switch (type) {
+    case WStype_DISCONNECTED:
+      Serial.printf("[%u] Desconectado\n", num);
+      break;
+    case WStype_CONNECTED:
+      {
+        IPAddress ip = webSocket.remoteIP(num);
+        Serial.printf("[%u] conectado desde %d.%d.%d.%d\n", num, ip[0], ip[1], ip[2], ip[3]);
+        break;
+      }
+    default:
+      break;
+  }
+}
+
+float temperatureRec = 0;
+float humidityRec = 0;
+void receivedCallback(uint32_t from, String& msg) {
+  Serial.printf("Recibido del nodo %u: %s\n", from, msg.c_str());
+  if (msg.startsWith("Temperature:")) {
+    float temperature = msg.substring(12).toFloat();
+    temperatureRec = temperature;
+    Serial.println("Temperatura recibida: " + String(temperature));
+  } else if (msg.startsWith("Humidity:")) {
+    float humidity = msg.substring(9).toFloat();
+    humidityRec = humidity;
+    Serial.println("Humedad recibida: " + String(humidity));
+  }
+  String data = "{\"temperature\":" + String(temperatureRec) + ", \"humidity\":" + String(humidityRec) + "}";
+  webSocket.broadcastTXT(data);
+}
+
+void newConnectionCallback(uint32_t nodeId) {
+  Serial.printf("Nueva conexión, nodo ID = %u\n", nodeId);
+}
+
+void changedConnectionCallback() {
+  Serial.println("Conexiones cambiadas");
+}
+
+void nodeTimeAdjustedCallback(int32_t offset) {
+  Serial.printf("Tiempo ajustado %u. Offset = %d\n", mesh.getNodeTime(), offset);
+}
+
+void notFound(AsyncWebServerRequest* request) {
+  request->send(404, "text/plain", "Pagina no encontrada bro");
+}
+
+void sendMessage() {
+  taskSendMessage.setInterval(random(TASK_SECOND * 1, TASK_SECOND * 5));
+}
+
+void setupMDNS() {
+  if (!MDNS.begin("hell-mesh")) {
+    Serial.println("Error setting up MDNS responder!");
+    while (1) {
+      delay(1000);
+    }
+  }
+  Serial.println("mDNS responder started");
+}
